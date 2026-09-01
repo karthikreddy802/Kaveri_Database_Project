@@ -290,27 +290,27 @@
 }
 
 .lp-hero-bg-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scale(1.05);
-  animation: heroZoom 20s ease-in-out infinite alternate;
+  object-position: center;
+  transform: scale(1.06);
+  animation: heroZoom 22s ease-in-out infinite alternate;
 }
 
 @keyframes heroZoom {
-  from { transform: scale(1.05); }
-  to   { transform: scale(1.12); }
+  from { transform: scale(1.06); }
+  to   { transform: scale(1.14); }
 }
 
 .lp-hero-overlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    135deg,
-    rgba(5,10,24,0.92) 0%,
-    rgba(10,22,40,0.75) 50%,
-    rgba(5,10,24,0.55) 100%
-  );
+  background:
+    linear-gradient(90deg, rgba(5,10,24,0.88) 0%, rgba(5,10,24,0.62) 48%, rgba(5,10,24,0.42) 100%),
+    linear-gradient(to top, rgba(5,10,24,0.92) 0%, transparent 42%);
 }
 
 .lp-hero-particles {

@@ -207,22 +207,18 @@ function HeroSection({ navigate }) {
     <section className="lp-hero" id="home" aria-label="Hero section">
       {/* Background */}
       <div className="lp-hero-bg">
+        <img
+          className="lp-hero-bg-img"
+          src="https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?q=80&w=1920&auto=format&fit=crop"
+          alt=""
+          aria-hidden="true"
+        />
+        <div className="lp-hero-overlay" />
         <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(135deg, #050a18 0%, #0a1628 40%, #0f2044 70%, #1a3a6e 100%)'
-        }} />
-        {/* Floating orbs */}
-        <div style={{
-          position: 'absolute', top: '20%', right: '10%',
+          position: 'absolute', top: '18%', right: '8%',
           width: 400, height: 400, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(212,168,71,0.12) 0%, transparent 70%)',
-          filter: 'blur(40px)'
-        }} />
-        <div style={{
-          position: 'absolute', bottom: '10%', left: '5%',
-          width: 300, height: 300, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(26,58,110,0.5) 0%, transparent 70%)',
-          filter: 'blur(40px)'
+          background: 'radial-gradient(circle, rgba(212,168,71,0.16) 0%, transparent 70%)',
+          filter: 'blur(40px)', pointerEvents: 'none'
         }} />
       </div>
 
