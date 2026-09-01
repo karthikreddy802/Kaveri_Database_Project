@@ -84,6 +84,7 @@ def ensure():
         with conn.cursor() as cur:
             for stmt in DDL:
                 cur.execute(stmt)
+            cur.execute("ALTER TABLE account ALTER COLUMN created_at SET DEFAULT NOW();")
         conn.commit()
         print("ensure_schema: tables ready.")
     finally:

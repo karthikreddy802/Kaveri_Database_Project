@@ -55,8 +55,8 @@ def register(body: RegisterRequest):
             )
             guest_id = cur.fetchone()[0]
             cur.execute(
-                """INSERT INTO account (email, password_hash, role, guest_id)
-                   VALUES (%s, %s, 'guest', %s) RETURNING account_id""",
+                """INSERT INTO account (email, password_hash, role, guest_id, created_at)
+                   VALUES (%s, %s, 'guest', %s, NOW()) RETURNING account_id""",
                 (str(body.email), password_hash, guest_id),
             )
             account_id = cur.fetchone()[0]

@@ -44,8 +44,8 @@ def upsert_account(cur, email, password, role, property_id=None, guest_id=None):
         print(f"  updated {email} ({role})")
         return
     cur.execute(
-        """INSERT INTO account (email, password_hash, role, property_id, guest_id)
-           VALUES (%s, %s, %s, %s, %s)""",
+        """INSERT INTO account (email, password_hash, role, property_id, guest_id, created_at)
+           VALUES (%s, %s, %s, %s, %s, NOW())""",
         (email, hashed, role, property_id, guest_id),
     )
     print(f"  created {email} ({role})")
@@ -101,8 +101,8 @@ def ensure_owner():
                     continue
                 try:
                     cur.execute(
-                        """INSERT INTO account (email, password_hash, role, guest_id)
-                           VALUES (%s, %s, 'guest', %s)""",
+                        """INSERT INTO account (email, password_hash, role, guest_id, created_at)
+                           VALUES (%s, %s, 'guest', %s, NOW())""",
                         (email, guest_hash, guest_id),
                     )
                 except Exception as exc:
