@@ -27,6 +27,7 @@ services:
       DB_NAME: ${DB_NAME:-kaveri}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-2004}
+      CORS_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173,http://40.192.98.128:5173,http://40.192.98.128:8000"
     ports:
       - "8000:8000"
     depends_on:

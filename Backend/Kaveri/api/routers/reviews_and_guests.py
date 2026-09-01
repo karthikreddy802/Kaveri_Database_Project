@@ -1,5 +1,6 @@
 """Reviews and guests routers."""
 
+import psycopg
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Optional

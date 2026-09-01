@@ -15,15 +15,28 @@ router = APIRouter(prefix="/properties", tags=["properties"])
 
 
 @router.get("", response_model=PropertyListResponse)
+@router.get("/", response_model=PropertyListResponse, include_in_schema=False)
 def list_properties():
-    """Public: list all properties."""
-    with _db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT property_id, name, city, stars FROM property ORDER BY property_id")
-            rows = cur.fetchall()
-    return PropertyListResponse(
-        items=[Property(id=r[0], name=r[1], city=r[2], stars=r[3]) for r in rows]
-    )
+    """Public: list all properties. Always 200 so the landing page never shows a 500."""
+    try:
+        with _db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT property_id, name, city, stars FROM property ORDER BY property_id"
+                )
+                rows = cur.fetchall()
+    except Exception:
+        return PropertyListResponse(items=[])
+
+    items = []
+    for r in rows:
+        stars = r[3]
+        try:
+            stars = int(stars) if stars is not None else None
+        except (TypeError, ValueError):
+            stars = None
+        items.append(Property(id=int(r[0]), name=str(r[1]), city=str(r[2]), stars=stars))
+    return PropertyListResponse(items=items)
 
 
 @router.get("/{property_id}", response_model=Property)

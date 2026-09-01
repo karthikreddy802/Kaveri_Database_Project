@@ -4,6 +4,7 @@ State machine: confirmed -> checked_in -> checked_out
                confirmed -> cancelled | no_show
 """
 
+import psycopg
 from decimal import Decimal
 from datetime import date, datetime, timezone
 from typing import Optional

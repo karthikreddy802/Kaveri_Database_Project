@@ -11,8 +11,9 @@ export default defineConfig({
       '/me':         'http://localhost:8000',
       '/properties': 'http://localhost:8000',
       '/bookings':   'http://localhost:8000',
+      '/payments':   'http://localhost:8000',
       '/guests':     'http://localhost:8000',
       '/reports':    'http://localhost:8000',
-    }
+    },
   }
 })

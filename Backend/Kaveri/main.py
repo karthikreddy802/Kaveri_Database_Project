@@ -17,8 +17,10 @@ from api.middleware.exceptions import (
     django_validation_exception_handler,
     django_db_integrity_exception_handler,
     starlette_http_exception_handler,
+    psycopg_exception_handler,
     general_exception_handler,
 )
+import psycopg
 from config.settings import SECRET_KEY  # Raises RuntimeError if missing
 
 # Import all routers
@@ -44,11 +46,12 @@ app = FastAPI(
 # ── CORS ────────────────────────────────────────────────────────────────────────
 _cors = os.getenv(
     "CORS_ORIGINS",
-    "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://frontend",
+    "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://frontend,http://40.192.98.128:5173,http://40.192.98.128:8000",
 ).split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in _cors if o.strip()],
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -59,6 +62,8 @@ app.add_exception_handler(RequestValidationError, pydantic_validation_exception_
 app.add_exception_handler(DjangoValidationError, django_validation_exception_handler)
 app.add_exception_handler(django_db_utils.IntegrityError, django_db_integrity_exception_handler)
 app.add_exception_handler(StarletteHTTPException, starlette_http_exception_handler)
+app.add_exception_handler(psycopg.Error, psycopg_exception_handler)
+app.add_exception_handler(django_db_utils.OperationalError, psycopg_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 
 # ── ROUTERS ─────────────────────────────────────────────────────────────────────

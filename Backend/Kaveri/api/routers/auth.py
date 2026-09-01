@@ -3,6 +3,7 @@ Authentication router: /auth/register, /auth/login, /auth/refresh, /auth/logout,
 """
 
 import bcrypt
+import psycopg
 from fastapi import APIRouter, HTTPException, status, Depends, Request
 from api.db import get_conn as _db
 

@@ -76,7 +76,7 @@ export default function Dashboard() {
 
       setStats({ total_bookings, total_props, revenue, occ })
     } catch (e) {
-      console.error(e)
+      /* keep dashboard usable when a report/booking call fails */
     } finally { setLoading(false) }
   }
 

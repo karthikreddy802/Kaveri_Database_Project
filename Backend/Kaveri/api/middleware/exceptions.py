@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
@@ -23,7 +24,7 @@ def format_error_response(code: str, message: str, detail = None, status_code: i
         
     return JSONResponse(status_code=status_code, content=content)
 
-async def pydantic_validation_exception_handler(request: Request, exc: RequestValidationError):
+def pydantic_validation_exception_handler(request: Request, exc: RequestValidationError):
     detail = []
     for err in exc.errors():
         # Get the field name from loc path
@@ -43,7 +44,7 @@ async def pydantic_validation_exception_handler(request: Request, exc: RequestVa
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
     )
 
-async def django_validation_exception_handler(request: Request, exc: DjangoValidationError):
+def django_validation_exception_handler(request: Request, exc: DjangoValidationError):
     detail = []
     if hasattr(exc, "message_dict"):
         for field, messages in exc.message_dict.items():
@@ -67,7 +68,7 @@ async def django_validation_exception_handler(request: Request, exc: DjangoValid
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
     )
 
-async def django_db_integrity_exception_handler(request: Request, exc: django_db_utils.IntegrityError):
+def django_db_integrity_exception_handler(request: Request, exc: django_db_utils.IntegrityError):
     # Extract underlying psycopg exception if present
     cause = exc.__cause__
     sqlstate = getattr(cause, "sqlstate", None)
@@ -164,7 +165,7 @@ async def django_db_integrity_exception_handler(request: Request, exc: django_db
         status_code=status.HTTP_400_BAD_REQUEST
     )
 
-async def starlette_http_exception_handler(request: Request, exc):
+def starlette_http_exception_handler(request: Request, exc):
     # Map HTTP status codes cleanly
     code_map = {
         401: "unauthenticated",
@@ -181,10 +182,33 @@ async def starlette_http_exception_handler(request: Request, exc):
         status_code=exc.status_code
     )
 
-async def general_exception_handler(request: Request, exc: Exception):
-    logger.critical(f"Unhandled server error: {str(exc)}", exc_info=True)
+def psycopg_exception_handler(request: Request, exc: Exception):
+    logger.error("Database error on %s: %s", request.url.path, exc, exc_info=True)
+    name = type(exc).__name__
+    if name in {"OperationalError", "InterfaceError"} or isinstance(
+        exc, (psycopg.OperationalError, psycopg.InterfaceError)
+    ):
+        return format_error_response(
+            code="database_unavailable",
+            message="Database is temporarily unavailable. Check Postgres is running and DB settings in .env.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return format_error_response(
+        code="database_error",
+        message="A database error occurred.",
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+
+
+def general_exception_handler(request: Request, exc: Exception):
+    logger.critical("Unhandled server error on %s: %s", request.url.path, exc, exc_info=True)
+    debug = os.getenv("DEBUG", "true").lower() in ("1", "true", "yes")
     return format_error_response(
         code="internal_server_error",
-        message="An unexpected error occurred. Please contact system administrators.",
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        message=(
+            f"{type(exc).__name__}: {exc}"
+            if debug
+            else "An unexpected error occurred. Please contact system administrators."
+        ),
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
     )

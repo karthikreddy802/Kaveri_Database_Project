@@ -313,9 +313,15 @@ function PropertiesSection({ navigate }) {
   ]
 
   useEffect(() => {
+    let cancelled = false
     API.get('/properties')
-      .then(r => setProperties(r.data.items || []))
+      .then(r => {
+        if (!cancelled && Array.isArray(r.data?.items) && r.data.items.length) {
+          setProperties(r.data.items)
+        }
+      })
       .catch(() => {})
+    return () => { cancelled = true }
   }, [])
 
   return (
