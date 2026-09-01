@@ -1,3 +1,4 @@
+
 # Kaveri Stays — Hotel Management System
 
 An enterprise-grade Hotel Management System built around an existing PostgreSQL schema. Integrates Django (admin and ORM), FastAPI (RESTful API), and React (Vite-based modern UI).
@@ -75,3 +76,5 @@ npm run dev
 ### 👥 Guest Accounts
 - Email: Any guest email from `guest` table (e.g., `aarav.sharma@example.com`)
 - Password: `Kaveri@2025`
+
+
