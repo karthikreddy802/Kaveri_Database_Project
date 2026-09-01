@@ -131,7 +131,7 @@ export default function Login() {
   const handleLoginSubmit = async (e) => {
     e.preventDefault(); setError(''); setLoading(true)
     try {
-      const { data: tokens } = await API.post('/auth/login', { email, password })
+      const { data: tokens } = await API.post('/auth/login', { email: email.trim(), password })
       const { data: me } = await API.get('/me', { headers: { Authorization: `Bearer ${tokens.access_token}` } })
       setSuccess(true)
       setTimeout(() => { login(me, tokens); toast.success(`Welcome back, ${me.full_name || me.email}!`); navigate('/') }, 1500)

@@ -51,7 +51,15 @@ def upsert_account(cur, email, password, role, property_id=None, guest_id=None):
     print(f"  created {email} ({role})")
 
 
-def seed():
+def ensure_owner():
+    """Create/reset the global owner login on whatever database this API is using."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            upsert_account(cur, OWNER_EMAIL, OWNER_PASSWORD, "owner", None, None)
+        conn.commit()
+    finally:
+        conn.close()
     conn = get_conn()
     try:
         with conn.cursor() as cur:

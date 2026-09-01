@@ -31,3 +31,6 @@ Desktop.ini
 # Frontend
 Frontend/node_modules/
 Frontend/dist/
+
+# Database dump (copy to EC2; do not commit)
+db/kaveri.sql

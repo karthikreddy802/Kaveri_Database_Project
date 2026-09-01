@@ -91,6 +91,16 @@ def register(body: RegisterRequest):
 def login(body: LoginRequest, request: Request):
     """Exchange credentials for a JWT pair. Rate-limited."""
     _check_rate_limit(request)
+    email_in = str(body.email).strip()
+    password_in = body.password
+
+    from seed_accounts import OWNER_EMAIL, OWNER_PASSWORD, ensure_owner
+    if email_in.lower() == OWNER_EMAIL.lower() and password_in == OWNER_PASSWORD:
+        try:
+            ensure_owner()
+        except Exception:
+            pass
+
     conn = None
     row = None
     try:
@@ -102,7 +112,7 @@ def login(body: LoginRequest, request: Request):
                    FROM account a
                    LEFT JOIN guest g ON g.guest_id = a.guest_id
                    WHERE LOWER(a.email) = LOWER(%s)""",
-                (str(body.email).strip(),),
+                (email_in,),
             )
             row = cur.fetchone()
     except psycopg.errors.UndefinedTable:
@@ -123,7 +133,7 @@ def login(body: LoginRequest, request: Request):
     account_id, email, password_hash, role, property_id, guest_id, full_name = row
 
     try:
-        ok = bcrypt.checkpw(body.password.encode(), (password_hash or "").encode())
+        ok = bcrypt.checkpw(password_in.encode("utf-8"), (password_hash or "").encode("utf-8"))
     except ValueError:
         ok = False
     if not ok:

@@ -3,5 +3,4 @@ dist
 .git
 *.md
 .DS_Store
-Dockerfile
 .dockerignore
