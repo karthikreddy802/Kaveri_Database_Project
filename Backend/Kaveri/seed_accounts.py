@@ -1,87 +1,117 @@
 """
-Seed the `account` table from existing guests (for development login).
-Each guest gets an account with:
-  - email from guest.email
-  - default password: Kaveri@2025 (bcrypt hashed)
-  - role: guest
-  - property_id: NULL
-Run once from the Backend/Kaveri directory.
+Bootstrap demo logins so they work on local, Docker, and EC2.
+Owner is always upserted to the known password.
 """
 import bcrypt
 from api.db import get_conn
 
-DEFAULT_PASSWORD = "Kaveri@2025"
+OWNER_EMAIL = "owner@kaveri.com"
+OWNER_PASSWORD = "KaveriOwner@2025"
+
+STAFF = [
+    ("manager1@kaveri.com", "Manager1@2025", "manager", 1),
+    ("manager2@kaveri.com", "Manager2@2025", "manager", 2),
+    ("manager3@kaveri.com", "Manager3@2025", "manager", 3),
+    ("staff@kaveri.com", "Staff@2025", "staff", 1),
+]
+
+GUEST_PASSWORD = "Kaveri@2025"
+
+
+def _hash(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def _property_exists(cur, property_id):
+    cur.execute("SELECT 1 FROM property WHERE property_id = %s", (property_id,))
+    return cur.fetchone() is not None
+
+
+def upsert_account(cur, email, password, role, property_id=None, guest_id=None):
+    hashed = _hash(password)
+    cur.execute(
+        "SELECT account_id FROM account WHERE LOWER(email) = LOWER(%s)",
+        (email,),
+    )
+    row = cur.fetchone()
+    if row:
+        cur.execute(
+            """UPDATE account
+               SET password_hash = %s, role = %s, property_id = %s, guest_id = %s
+               WHERE account_id = %s""",
+            (hashed, role, property_id, guest_id, row[0]),
+        )
+        print(f"  updated {email} ({role})")
+        return
+    cur.execute(
+        """INSERT INTO account (email, password_hash, role, property_id, guest_id)
+           VALUES (%s, %s, %s, %s, %s)""",
+        (email, hashed, role, property_id, guest_id),
+    )
+    print(f"  created {email} ({role})")
+
 
 def seed():
-    hashed = bcrypt.hashpw(DEFAULT_PASSWORD.encode(), bcrypt.gensalt(rounds=12)).decode()
-
-    with get_conn() as conn:
+    conn = get_conn()
+    try:
         with conn.cursor() as cur:
-            cur.execute("SELECT guest_id, email FROM guest ORDER BY guest_id")
-            guests = cur.fetchall()
+            upsert_account(cur, OWNER_EMAIL, OWNER_PASSWORD, "owner", None, None)
+        conn.commit()
+        print(f"OWNER ready: {OWNER_EMAIL} / {OWNER_PASSWORD}")
 
-        seeded = 0
-        for guest_id, email in guests:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM account WHERE email = %s", (email,))
-                if cur.fetchone():
-                    print(f"  SKIP (exists): {email}")
+        with conn.cursor() as cur:
+            for email, password, role, prop_id in STAFF:
+                pid = prop_id if _property_exists(cur, prop_id) else None
+                if role in ("staff", "manager") and pid is None:
+                    print(f"  skip {email}: property {prop_id} not found")
+                    continue
+                try:
+                    upsert_account(cur, email, password, role, pid, None)
+                except Exception as exc:
+                    conn.rollback()
+                    print(f"  skip {email}: {exc}")
+                    continue
+        conn.commit()
+
+        with conn.cursor() as cur:
+            try:
+                cur.execute("SELECT guest_id, email FROM guest ORDER BY guest_id")
+                guests = cur.fetchall()
+            except Exception as exc:
+                print(f"  guest seed skipped: {exc}")
+                guests = []
+
+            guest_hash = _hash(GUEST_PASSWORD)
+            for guest_id, email in guests:
+                if not email:
                     continue
                 cur.execute(
-                    """INSERT INTO account (email, password_hash, role, guest_id)
-                       VALUES (%s, %s, 'guest', %s)""",
-                    (email, hashed, guest_id)
+                    "SELECT account_id FROM account WHERE LOWER(email) = LOWER(%s)",
+                    (email,),
                 )
-                seeded += 1
-
-        conn.commit()
-        print(f"\nSeeded {seeded} guest accounts.")
-        print(f"Default password: {DEFAULT_PASSWORD}")
-        print("\nLogin with any guest email from the guest table.")
-
-        # Also create one owner account
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM account WHERE email = 'owner@kaveri.com'")
-            if not cur.fetchone():
-                owner_hash = bcrypt.hashpw("KaveriOwner@2025".encode(), bcrypt.gensalt(rounds=12)).decode()
-                cur.execute(
-                    """INSERT INTO account (email, password_hash, role, property_id)
-                       VALUES ('owner@kaveri.com', %s, 'owner', NULL)""",
-                    (owner_hash,)
-                )
-                print("\nCreated OWNER account:")
-                print("  email: owner@kaveri.com")
-                print("  password: KaveriOwner@2025")
-
-        # Manager for each property
-        for prop_id, prop_name in [(1, 'Hilltop'), (2, 'Backwater'), (3, 'Riverside')]:
-            email = f"manager{prop_id}@kaveri.com"
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM account WHERE email = %s", (email,))
-                if not cur.fetchone():
-                    mgr_hash = bcrypt.hashpw(f"Manager{prop_id}@2025".encode(), bcrypt.gensalt(rounds=12)).decode()
+                if cur.fetchone():
+                    continue
+                try:
                     cur.execute(
-                        """INSERT INTO account (email, password_hash, role, property_id)
-                           VALUES (%s, %s, 'manager', %s)""",
-                        (email, mgr_hash, prop_id)
+                        """INSERT INTO account (email, password_hash, role, guest_id)
+                           VALUES (%s, %s, 'guest', %s)""",
+                        (email, guest_hash, guest_id),
                     )
-                    print(f"  Manager: {email} / Manager{prop_id}@2025")
-
-        # Staff for property 1
-        staff_email = "staff@kaveri.com"
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM account WHERE email = %s", (staff_email,))
-            if not cur.fetchone():
-                st_hash = bcrypt.hashpw("Staff@2025".encode(), bcrypt.gensalt(rounds=12)).decode()
-                cur.execute(
-                    """INSERT INTO account (email, password_hash, role, property_id)
-                       VALUES (%s, %s, 'staff', 1)""",
-                    (staff_email, st_hash)
-                )
-                print(f"  Staff: {staff_email} / Staff@2025")
-
+                except Exception as exc:
+                    conn.rollback()
+                    print(f"  skip guest {email}: {exc}")
+                    continue
         conn.commit()
-        print("\nAll accounts ready.")
+        print("Demo accounts ready.")
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print(f"seed_accounts failed: {type(exc).__name__}: {exc}")
+    finally:
+        conn.close()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     seed()

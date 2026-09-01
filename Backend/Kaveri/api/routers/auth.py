@@ -102,7 +102,7 @@ def login(body: LoginRequest, request: Request):
                    FROM account a
                    LEFT JOIN guest g ON g.guest_id = a.guest_id
                    WHERE LOWER(a.email) = LOWER(%s)""",
-                (str(body.email),),
+                (str(body.email).strip(),),
             )
             row = cur.fetchone()
     except psycopg.errors.UndefinedTable:
