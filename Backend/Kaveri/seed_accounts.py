@@ -121,5 +121,8 @@ def ensure_owner():
         conn.close()
 
 
+seed = ensure_owner
+
 if __name__ == "__main__":
-    seed()
+    ensure_owner()
+
