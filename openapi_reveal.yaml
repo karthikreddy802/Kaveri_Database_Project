@@ -1,0 +1,1284 @@
+openapi: 3.1.0
+
+info:
+  title: Kaveri Stays API
+  version: "1.0.0"
+  summary: Reveal specification for the Kaveri Stays API assignment.
+  description: |
+    # Read this before you read the paths
+
+    This is ONE reasonable design. It is not the only one. Several of the choices
+    below are genuinely arguable and the Interlude expects you to argue with them.
+    A few are not arguable, and those are marked.
+
+    ## Conventions this specification commits to
+
+    **Dates.** Every date is ISO 8601 `YYYY-MM-DD`. A stay is the half-open interval
+    `[check_in, check_out)`. The check-out date is NOT part of the stay. This is what
+    makes same-day turnover work (rule 5), and it is NOT arguable.
+
+    **Money.** Every amount is a decimal string, never a JSON number. `"4500.00"`,
+    not `4500.0`. Floats lose money.
+
+    **Empty collections.** A list endpoint with no matching rows returns 200 and an
+    empty `items` array. It never returns 404. 404 means the container does not exist,
+    not that it is empty.
+
+    **401 versus 403.** 401 means the server does not know who you are: no token, an
+    expired token, a forged token. 403 means it knows exactly who you are and you may
+    not do this. This distinction is NOT arguable.
+
+    **Request bodies.** Every request schema sets `additionalProperties: false`. A
+    field you did not declare is rejected rather than ignored. This is what defeats
+    attacks 8.2 and 8.8 structurally rather than by remembering to check.
+
+    **Errors.** Every non-2xx response, without exception, uses the `Error` envelope.
+
+    **Roles.** Each operation carries `x-roles` listing who may call it. Together these
+    are the authorization matrix from task 3.11. `owner` is not a superset by default:
+    where the owner is absent from `x-roles`, the owner genuinely may not call it.
+
+    **Pagination.** Offset-based, `limit` and `offset`. Keyset would be defensible and
+    better at scale; argue it in R4 if you chose it.
+
+    ## Choices that are arguable
+
+    - Booking transitions are action endpoints (`/check-in`) rather than one `PATCH`
+      carrying a status.
+    - Reporting lives under `/reports` with a `property_id` query parameter rather
+      than under `/properties/{id}/reports`.
+    - `GET /bookings/{id}` on someone else's booking returns 404, not 403, so the
+      endpoint cannot be used to discover that a booking exists.
+    - A review posted before checkout is 403; a second review on the same booking is
+      409. Two different failures, two different codes.
+
+  contact:
+    name: Kaveri Stays engineering
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+    description: Registration, login, tokens.
+  - name: properties
+    description: Properties, rooms and availability.
+  - name: bookings
+    description: The booking lifecycle.
+  - name: payments
+    description: Instalment payments against a booking.
+  - name: reviews
+    description: Post-stay reviews.
+  - name: reports
+    description: Occupancy, ADR, RevPAR and revenue.
+  - name: guests
+    description: Guest records. Staff and above only.
+
+paths:
+
+  # ----------------------------------------------------------------- auth ---
+
+  /auth/register:
+    post:
+      tags: [auth]
+      operationId: register
+      summary: Register a guest account.
+      description: |
+        Creates a guest account and nothing else. There is no path through this
+        endpoint to any other role. `additionalProperties: false` is what makes
+        attack 8.2 fail; do not rely on remembering to strip a `role` field.
+      security: []
+      x-roles: [public]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Account created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Exchange credentials for a token pair.
+      description: |
+        The failure response is identical for an unknown email and a wrong password.
+        Anything else answers attack 8.14 for the attacker.
+      security: []
+      x-roles: [public]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refresh
+      summary: Rotate a refresh token.
+      description: |
+        Refresh tokens are single use. Presenting one that has already been rotated
+        is 401, and a correct implementation also invalidates the whole token family,
+        because reuse means the token leaked. This is attack 8.6.
+      security: []
+      x-roles: [public]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: New token pair issued; the presented refresh token is now dead.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Revoke the caller's refresh token.
+      x-roles: [guest, staff, manager, owner]
+      responses:
+        '204':
+          description: Revoked. Nothing to return.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: The caller's own record.
+      x-roles: [guest, staff, manager, owner]
+      responses:
+        '200':
+          description: The caller.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ----------------------------------------------------------- properties ---
+
+  /properties:
+    get:
+      tags: [properties]
+      operationId: listProperties
+      summary: All properties.
+      security: []
+      x-roles: [public]
+      responses:
+        '200':
+          description: Properties.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Property' }
+
+  /properties/{property_id}:
+    get:
+      tags: [properties]
+      operationId: getProperty
+      summary: One property.
+      security: []
+      x-roles: [public]
+      parameters:
+        - $ref: '#/components/parameters/PropertyIdPath'
+      responses:
+        '200':
+          description: The property.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Property' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /properties/{property_id}/rooms:
+    get:
+      tags: [properties]
+      operationId: listRooms
+      summary: Full room inventory for a property.
+      description: |
+        Every room, including rooms that have never been booked. Task 4.7. If your
+        implementation joins through `bookings`, never-booked rooms vanish and several
+        of your Stage 4 queries from the database assignment stop agreeing with this.
+      x-roles: [staff, manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/PropertyIdPath'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+      responses:
+        '200':
+          description: Rooms.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomPage' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /properties/{property_id}/availability:
+    get:
+      tags: [properties]
+      operationId: getAvailability
+      summary: Rooms free for a whole date range.
+      description: |
+        Task 4.1, and the query the booking desk runs all day. Because a stay is
+        `[check_in, check_out)`, a room whose previous guest departs on `from` IS
+        available. Cancelled and no-show bookings do not occupy a room.
+      security: []
+      x-roles: [public]
+      parameters:
+        - $ref: '#/components/parameters/PropertyIdPath'
+        - name: from
+          in: query
+          required: true
+          description: First night of the stay, inclusive.
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          description: Departure date, exclusive. Must be strictly after `from`.
+          schema: { type: string, format: date }
+        - name: room_type
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/RoomTypeName' }
+      responses:
+        '200':
+          description: Available rooms, with the rate for the requested range.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailabilityResponse' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  # ------------------------------------------------------------- bookings ---
+
+  /bookings:
+    get:
+      tags: [bookings]
+      operationId: listBookings
+      summary: Bookings visible to the caller.
+      description: |
+        A guest sees only their own. Staff and managers see only their own property's.
+        The owner sees everything. This filtering belongs in the WHERE clause, not in
+        a list comprehension after the query. `sort` accepts only the values in its
+        enum; anything else is 422, which is what closes attack 8.11.
+      x-roles: [guest, staff, manager, owner]
+      parameters:
+        - name: property_id
+          in: query
+          schema: { type: integer }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/BookingStatus' }
+        - name: guest_id
+          in: query
+          description: Ignored for callers with the guest role.
+          schema: { type: integer }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: sort
+          in: query
+          description: Whitelisted. Not interpolated into SQL under any circumstances.
+          schema:
+            type: string
+            enum: [check_in, -check_in, created_at, -created_at, total_amount, -total_amount]
+            default: -check_in
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+      responses:
+        '200':
+          description: Bookings. Empty `items` when nothing matches.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingPage' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+    post:
+      tags: [bookings]
+      operationId: createBooking
+      summary: Take a booking.
+      description: |
+        One transaction: resolve the rate, insert the booking, record the deposit if
+        one was sent. Task 5.1.
+
+        There is no `nightly_rate` or `total_amount` field in the request. The rate is
+        resolved server-side from `rate_plans`. This is attack 8.8, and
+        `additionalProperties: false` is what refuses it.
+
+        A guest may only book for themselves; `guest_id` is ignored for guest callers
+        and taken from the token. Staff may book on behalf of any guest.
+
+        409 is an overlapping booking, caught by the exclusion constraint. 422 is a
+        guest count above the room type's maximum. These are different failures and
+        must not share a code.
+      x-roles: [guest, staff, manager, owner]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BookingCreate' }
+      responses:
+        '201':
+          description: Booked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            The room is already booked for overlapping dates. The body says the room is
+            unavailable and says nothing about who holds it or for which nights.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error:
+                  code: room_unavailable
+                  message: That room is not available for the requested dates.
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  /bookings/{booking_id}:
+    get:
+      tags: [bookings]
+      operationId: getBooking
+      summary: One booking.
+      description: |
+        A booking belonging to another guest returns 404, not 403. 403 would confirm
+        the booking exists, which is attack 8.1 succeeding quietly. Argue with this
+        choice in R4 if you disagree; it is arguable, and the argument is the point.
+      x-roles: [guest, staff, manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/BookingIdPath'
+      responses:
+        '200':
+          description: The booking.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /bookings/{booking_id}/check-in:
+    post:
+      tags: [bookings]
+      operationId: checkIn
+      summary: Check a guest in.
+      description: Staff only. Legal from `confirmed` and from nothing else.
+      x-roles: [staff, manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/BookingIdPath'
+      responses:
+        '200':
+          description: Checked in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IllegalTransition' }
+
+  /bookings/{booking_id}/check-out:
+    post:
+      tags: [bookings]
+      operationId: checkOut
+      summary: Check a guest out.
+      description: Staff only. Legal from `checked_in` and from nothing else.
+      x-roles: [staff, manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/BookingIdPath'
+      responses:
+        '200':
+          description: Checked out.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IllegalTransition' }
+
+  /bookings/{booking_id}/cancel:
+    post:
+      tags: [bookings]
+      operationId: cancelBooking
+      summary: Cancel a booking.
+      description: |
+        A guest may cancel their own. Staff may cancel any at their property. Legal
+        from `confirmed` only; you cannot cancel a stay someone is currently in.
+        Cancelling releases the room, which is task 8.16.
+      x-roles: [guest, staff, manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/BookingIdPath'
+      responses:
+        '200':
+          description: Cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IllegalTransition' }
+
+  /bookings/{booking_id}/no-show:
+    post:
+      tags: [bookings]
+      operationId: markNoShow
+      summary: Mark a booking as a no-show.
+      description: Staff only. Legal from `confirmed` only. Releases the room.
+      x-roles: [staff, manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/BookingIdPath'
+      responses:
+        '200':
+          description: Marked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IllegalTransition' }
+
+  # ------------------------------------------------------------- payments ---
+
+  /bookings/{booking_id}/payments:
+    get:
+      tags: [payments]
+      operationId: listPayments
+      summary: Payments recorded against a booking.
+      x-roles: [guest, staff, manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/BookingIdPath'
+      responses:
+        '200':
+          description: Payments, oldest first. Empty array is normal.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, total_paid, balance]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Payment' }
+                  total_paid: { type: string, examples: ["9000.00"] }
+                  balance:    { type: string, examples: ["4500.00"] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    post:
+      tags: [payments]
+      operationId: recordPayment
+      summary: Record an instalment.
+      description: |
+        Task 5.6. `Idempotency-Key` is required, not optional.
+
+        Replaying the same key with the same body returns 200 and the payment that was
+        already created. It does not create a second one. Reusing the same key with a
+        different body is 409, because that is a bug in the caller and silently
+        returning the old payment would hide it.
+
+        409 is also returned when the payment would take the total above the booking
+        amount.
+      x-roles: [guest, staff, manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/BookingIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentCreate' }
+      responses:
+        '200':
+          description: Idempotent replay. This payment already existed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '201':
+          description: Payment recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Idempotency key reused with a different body, or the total would be exceeded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  # -------------------------------------------------------------- reviews ---
+
+  /bookings/{booking_id}/review:
+    post:
+      tags: [reviews]
+      operationId: createReview
+      summary: Review a completed stay.
+      description: |
+        Task 5.8. Rule 9: only after checkout, only once, rating 1 to 5.
+
+        Three distinct failures with three distinct codes. Reviewing someone else's
+        stay is 404, consistent with `GET /bookings/{id}`. Reviewing your own stay
+        before you have checked out is 403, because you personally are not yet
+        permitted to do this. A second review on the same booking is 409, because it
+        collides with a row that already exists. A rating of 9 is 422.
+      x-roles: [guest]
+      parameters:
+        - $ref: '#/components/parameters/BookingIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewCreate' }
+      responses:
+        '201':
+          description: Review recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Review' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: The stay is not checked out yet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: This booking already has a review.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /properties/{property_id}/reviews:
+    get:
+      tags: [reviews]
+      operationId: listPropertyReviews
+      summary: Reviews for a property.
+      description: Guest names are shortened. Reviews never expose a guest email.
+      security: []
+      x-roles: [public]
+      parameters:
+        - $ref: '#/components/parameters/PropertyIdPath'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+      responses:
+        '200':
+          description: Reviews.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewPage' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # -------------------------------------------------------------- reports ---
+
+  /reports/occupancy:
+    get:
+      tags: [reports]
+      operationId: reportOccupancy
+      summary: Occupancy percentage per property per month.
+      description: |
+        A manager omitting `property_id` gets their own property. A manager naming a
+        property that is not theirs gets 403, not an empty result. This is attack 8.7.
+
+        The denominator is room-nights available, counting every room in the property
+        whether or not it was ever booked.
+      x-roles: [manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/ReportPropertyId'
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+      responses:
+        '200':
+          description: Occupancy rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/OccupancyRow' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /reports/adr:
+    get:
+      tags: [reports]
+      operationId: reportAdr
+      summary: Average daily rate per property per month.
+      x-roles: [manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/ReportPropertyId'
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+      responses:
+        '200':
+          description: ADR rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RateMetricRow' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /reports/revpar:
+    get:
+      tags: [reports]
+      operationId: reportRevpar
+      summary: Revenue per available room, per property per month.
+      x-roles: [manager, owner]
+      parameters:
+        - $ref: '#/components/parameters/ReportPropertyId'
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+      responses:
+        '200':
+          description: RevPAR rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RateMetricRow' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /reports/revenue:
+    get:
+      tags: [reports]
+      operationId: reportRevenue
+      summary: Revenue per property per month, across all properties.
+      description: |
+        Owner only. A manager receives 403 even for their own property, because this
+        endpoint's shape is cross-property by definition. Managers use the three
+        endpoints above.
+      x-roles: [owner]
+      parameters:
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+      responses:
+        '200':
+          description: Revenue rows, with a grand total.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, grand_total]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RevenueRow' }
+                  grand_total: { type: string, examples: ["4820500.00"] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # --------------------------------------------------------------- guests ---
+
+  /guests:
+    get:
+      tags: [guests]
+      operationId: listGuests
+      summary: Guest records.
+      description: |
+        Staff and above only. There is deliberately no endpoint through which a guest
+        can list, search or count other guests. Task 4.8.
+      x-roles: [staff, manager, owner]
+      parameters:
+        - name: email
+          in: query
+          description: Exact match, case-insensitive. Not a prefix search.
+          schema: { type: string, format: email }
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+      responses:
+        '200':
+          description: Guests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GuestPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /guests/{guest_id}:
+    get:
+      tags: [guests]
+      operationId: getGuest
+      summary: One guest record.
+      x-roles: [staff, manager, owner]
+      parameters:
+        - name: guest_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: The guest.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Guest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+# ========================================================== components ======
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token in `Authorization: Bearer <token>`. Short lived. Obtain a new one
+        from `/auth/refresh` rather than by logging in again.
+
+  parameters:
+
+    PropertyIdPath:
+      name: property_id
+      in: path
+      required: true
+      schema: { type: integer }
+
+    BookingIdPath:
+      name: booking_id
+      in: path
+      required: true
+      schema: { type: integer }
+
+    LimitParam:
+      name: limit
+      in: query
+      description: Page size. Capped server-side; an unbounded list endpoint is a defect.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+
+    OffsetParam:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client-generated UUID. The same key must never produce two payments.
+      schema: { type: string, format: uuid }
+
+    ReportPropertyId:
+      name: property_id
+      in: query
+      description: Omit to mean "the property I manage". Owners may name any property.
+      schema: { type: integer }
+
+    ReportFrom:
+      name: from
+      in: query
+      required: true
+      schema: { type: string, format: date }
+
+    ReportTo:
+      name: to
+      in: query
+      required: true
+      schema: { type: string, format: date }
+
+  responses:
+
+    Unauthorized:
+      description: No token, an expired token, or a token that does not verify.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: unauthenticated, message: Authentication required. }
+
+    Forbidden:
+      description: Authenticated, and not permitted to do this.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: forbidden, message: You do not have access to this resource. }
+
+    NotFound:
+      description: No such resource, or none you are permitted to know about.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: not_found, message: Not found. }
+
+    Conflict:
+      description: The request conflicts with the current state of the system.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+    IllegalTransition:
+      description: |
+        The booking is not in a state from which this transition is legal. The body
+        names the current status and the transition attempted.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              code: illegal_transition
+              message: A cancelled booking cannot be checked in.
+              detail: { current_status: cancelled, attempted: check_in }
+
+    Unprocessable:
+      description: |
+        The request parsed and a field is unacceptable. Includes guest counts above
+        the room type maximum, check-out on or before check-in, ratings outside 1 to 5,
+        and any field not declared in the request schema.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              code: validation_failed
+              message: Request validation failed.
+              detail:
+                - field: guests
+                  reason: Exceeds maximum occupancy of 2 for room type Standard.
+
+    TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+      headers:
+        Retry-After:
+          description: Seconds until the caller may retry.
+          schema: { type: integer }
+
+  schemas:
+
+    # ---- error envelope (task 3.10) ----
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      description: |
+        Every non-2xx response in this API uses this shape. One handler produces it.
+        If you are constructing this dict in more than one module, consolidate.
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable, machine-readable, snake_case. Clients branch on this.
+              examples: [room_unavailable, illegal_transition, validation_failed]
+            message:
+              type: string
+              description: Human-readable. Safe to show a guest. Never a raw Postgres message.
+            detail:
+              description: Optional structured context. Never leaks table or column names.
+            request_id:
+              type: string
+              description: Correlates this response with your logs.
+
+    PageMeta:
+      type: object
+      additionalProperties: false
+      required: [limit, offset, total]
+      properties:
+        limit:  { type: integer }
+        offset: { type: integer }
+        total:  { type: integer, description: Total matching rows, ignoring pagination. }
+
+    # ---- enums ----
+
+    BookingStatus:
+      type: string
+      description: Rule 7. Cancelled and no-show release the room.
+      enum: [confirmed, checked_in, checked_out, cancelled, no_show]
+
+    PaymentMethod:
+      type: string
+      description: Rule 8.
+      enum: [card, upi, bank_transfer, cash]
+
+    RoomTypeName:
+      type: string
+      enum: [Standard, Deluxe, Suite]
+
+    Role:
+      type: string
+      enum: [guest, staff, manager, owner]
+
+    # ---- auth ----
+
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, full_name]
+      description: |
+        No `role` field exists here and none is accepted. Sending one is 422, which is
+        attack 8.2 refused structurally.
+      properties:
+        email:     { type: string, format: email }
+        password:  { type: string, minLength: 10, writeOnly: true }
+        full_name: { type: string, minLength: 1, maxLength: 120 }
+        phone:     { type: string }
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string, writeOnly: true }
+
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+
+    TokenPair:
+      type: object
+      additionalProperties: false
+      required: [access_token, refresh_token, token_type, expires_in]
+      properties:
+        access_token:  { type: string }
+        refresh_token: { type: string }
+        token_type:    { type: string, const: bearer }
+        expires_in:    { type: integer, description: Access token lifetime in seconds. }
+
+    Me:
+      type: object
+      additionalProperties: false
+      required: [id, email, full_name, role]
+      description: No password hash appears in this schema or any other. Task 4.6.
+      properties:
+        id:          { type: integer }
+        email:       { type: string, format: email }
+        full_name:   { type: string }
+        role:        { $ref: '#/components/schemas/Role' }
+        property_id:
+          type: [integer, "null"]
+          description: The property this staff member or manager belongs to. Null for guest and owner.
+
+    # ---- properties and rooms ----
+
+    Property:
+      type: object
+      additionalProperties: false
+      required: [id, name, city]
+      properties:
+        id:    { type: integer }
+        name:  { type: string, examples: ["Kaveri Riverside"] }
+        city:  { type: string, examples: ["Coorg"] }
+        stars: { type: integer, minimum: 1, maximum: 5 }
+
+    RoomType:
+      type: object
+      additionalProperties: false
+      required: [name, max_occupancy]
+      properties:
+        name:          { $ref: '#/components/schemas/RoomTypeName' }
+        max_occupancy: { type: integer, minimum: 1 }
+
+    Room:
+      type: object
+      additionalProperties: false
+      required: [id, property_id, room_number, room_type]
+      properties:
+        id:          { type: integer }
+        property_id: { type: integer }
+        room_number: { type: string, description: Unique within a property, repeats across them. Rule 2. }
+        room_type:   { $ref: '#/components/schemas/RoomType' }
+
+    RoomPage:
+      type: object
+      additionalProperties: false
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Room' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+
+    AvailableRoom:
+      type: object
+      additionalProperties: false
+      required: [room_id, room_number, room_type, nights, total_rate]
+      properties:
+        room_id:     { type: integer }
+        room_number: { type: string }
+        room_type:   { $ref: '#/components/schemas/RoomType' }
+        nights:      { type: integer }
+        total_rate:
+          type: string
+          description: |
+            Sum of the nightly rates across the requested range, resolved from
+            `rate_plans`. A stay crossing two seasons is priced per night, so this is
+            not `nights` multiplied by any single rate.
+          examples: ["13500.00"]
+
+    AvailabilityResponse:
+      type: object
+      additionalProperties: false
+      required: [property_id, from, to, items]
+      properties:
+        property_id: { type: integer }
+        from:        { type: string, format: date }
+        to:          { type: string, format: date }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AvailableRoom' }
+
+    # ---- bookings ----
+
+    BookingCreate:
+      type: object
+      additionalProperties: false
+      required: [room_id, check_in, check_out, guests]
+      properties:
+        room_id:   { type: integer }
+        check_in:  { type: string, format: date }
+        check_out: { type: string, format: date, description: Exclusive. Must be strictly after check_in. }
+        guests:    { type: integer, minimum: 1 }
+        guest_id:
+          type: integer
+          description: |
+            Staff booking on behalf of a guest. Ignored when the caller is a guest,
+            who may only book for themselves.
+        deposit:
+          $ref: '#/components/schemas/PaymentCreate'
+
+    Booking:
+      type: object
+      additionalProperties: false
+      required: [id, property_id, room_id, guest_id, check_in, check_out, nights, guests, status, total_amount, total_paid, balance]
+      properties:
+        id:           { type: integer }
+        property_id:  { type: integer }
+        room_id:      { type: integer }
+        room_number:  { type: string }
+        guest_id:     { type: integer }
+        guest_name:   { type: string }
+        check_in:     { type: string, format: date }
+        check_out:    { type: string, format: date }
+        nights:       { type: integer }
+        guests:       { type: integer }
+        status:       { $ref: '#/components/schemas/BookingStatus' }
+        total_amount: { type: string, examples: ["13500.00"] }
+        total_paid:   { type: string, examples: ["4500.00"] }
+        balance:      { type: string, examples: ["9000.00"] }
+        created_at:   { type: string, format: date-time }
+
+    BookingPage:
+      type: object
+      additionalProperties: false
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Booking' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+
+    # ---- payments ----
+
+    PaymentCreate:
+      type: object
+      additionalProperties: false
+      required: [amount, method]
+      properties:
+        amount: { type: string, description: Decimal string. Positive. }
+        method: { $ref: '#/components/schemas/PaymentMethod' }
+        reference:
+          type: string
+          description: Gateway or bank reference, when the method has one.
+
+    Payment:
+      type: object
+      additionalProperties: false
+      required: [id, booking_id, amount, method, paid_at]
+      properties:
+        id:         { type: integer }
+        booking_id: { type: integer }
+        amount:     { type: string }
+        method:     { $ref: '#/components/schemas/PaymentMethod' }
+        reference:  { type: string }
+        paid_at:    { type: string, format: date-time }
+
+    # ---- reviews ----
+
+    ReviewCreate:
+      type: object
+      additionalProperties: false
+      required: [rating]
+      properties:
+        rating:  { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string, maxLength: 2000 }
+
+    Review:
+      type: object
+      additionalProperties: false
+      required: [id, booking_id, rating, created_at]
+      properties:
+        id:          { type: integer }
+        booking_id:  { type: integer }
+        rating:      { type: integer, minimum: 1, maximum: 5 }
+        comment:     { type: string }
+        guest_name:  { type: string, description: Shortened. Never the full record, never the email. }
+        created_at:  { type: string, format: date-time }
+
+    ReviewPage:
+      type: object
+      additionalProperties: false
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Review' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+
+    # ---- reports ----
+
+    OccupancyRow:
+      type: object
+      additionalProperties: false
+      required: [property_id, month, room_nights_available, room_nights_sold, occupancy_pct]
+      properties:
+        property_id:           { type: integer }
+        property_name:         { type: string }
+        month:                 { type: string, examples: ["2025-12"] }
+        room_nights_available: { type: integer }
+        room_nights_sold:      { type: integer }
+        occupancy_pct:         { type: string, examples: ["78.40"] }
+
+    RateMetricRow:
+      type: object
+      additionalProperties: false
+      required: [property_id, month, value]
+      properties:
+        property_id:   { type: integer }
+        property_name: { type: string }
+        month:         { type: string, examples: ["2025-12"] }
+        value:         { type: string, examples: ["6420.00"] }
+
+    RevenueRow:
+      type: object
+      additionalProperties: false
+      required: [property_id, month, revenue]
+      properties:
+        property_id:   { type: integer }
+        property_name: { type: string }
+        month:         { type: string, examples: ["2025-12"] }
+        revenue:       { type: string, examples: ["1284000.00"] }
+
+    # ---- guests ----
+
+    Guest:
+      type: object
+      additionalProperties: false
+      required: [id, email, full_name]
+      properties:
+        id:         { type: integer }
+        email:      { type: string, format: email }
+        full_name:  { type: string }
+        phone:      { type: string }
+        stay_count: { type: integer }
+
+    GuestPage:
+      type: object
+      additionalProperties: false
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Guest' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
