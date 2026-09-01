@@ -168,11 +168,14 @@ def django_db_integrity_exception_handler(request: Request, exc: django_db_utils
 def starlette_http_exception_handler(request: Request, exc):
     # Map HTTP status codes cleanly
     code_map = {
+        400: "bad_request",
         401: "unauthenticated",
         403: "forbidden",
         404: "not_found",
         405: "method_not_allowed",
-        429: "too_many_requests"
+        409: "conflict",
+        429: "too_many_requests",
+        503: "unavailable",
     }
     code = code_map.get(exc.status_code, "error")
     logger.warning(f"HTTP error {exc.status_code}: {exc.detail}")
@@ -185,6 +188,19 @@ def starlette_http_exception_handler(request: Request, exc):
 def psycopg_exception_handler(request: Request, exc: Exception):
     logger.error("Database error on %s: %s", request.url.path, exc, exc_info=True)
     name = type(exc).__name__
+    sqlstate = getattr(exc, "sqlstate", None)
+    if sqlstate == "23505" or name == "UniqueViolation":
+        return format_error_response(
+            code="conflict",
+            message="This email is already registered.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+    if name == "UndefinedTable" or sqlstate == "42P01":
+        return format_error_response(
+            code="database_unavailable",
+            message="Database schema is missing. Restart the backend container.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
     if name in {"OperationalError", "InterfaceError"} or isinstance(
         exc, (psycopg.OperationalError, psycopg.InterfaceError)
     ):
@@ -196,7 +212,7 @@ def psycopg_exception_handler(request: Request, exc: Exception):
     return format_error_response(
         code="database_error",
         message="A database error occurred.",
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        status_code=status.HTTP_400_BAD_REQUEST,
     )
 
 

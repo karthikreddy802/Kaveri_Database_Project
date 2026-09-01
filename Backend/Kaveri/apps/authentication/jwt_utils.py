@@ -26,8 +26,8 @@ def create_access_token(account: dict) -> str:
         "email": account["email"],
         "role": account["role"],
         "property_id": account.get("property_id"),
-        "iat": now,
-        "exp": expire,
+        "iat": int(now.timestamp()),
+        "exp": int(expire.timestamp()),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 

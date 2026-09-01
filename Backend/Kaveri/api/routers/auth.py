@@ -44,31 +44,45 @@ def _check_rate_limit(request: Request):
 def register(body: RegisterRequest):
     """Register a new guest account. No role field accepted (Attack 8.2)."""
     password_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt(rounds=12)).decode()
-
-    with _db() as conn:
+    phone = body.phone or None
+    conn = None
+    try:
+        conn = _db()
         with conn.cursor() as cur:
-            # Insert into guest table
-            try:
-                cur.execute(
-                    "INSERT INTO guest (name, email, phone) VALUES (%s, %s, %s) RETURNING guest_id",
-                    (body.full_name, body.email, body.phone),
-                )
-                guest_id = cur.fetchone()[0]
-            except psycopg.errors.UniqueViolation:
-                raise HTTPException(status_code=409, detail="This email is already registered.")
-
-            # Insert into account table — role is always 'guest' here
-            try:
-                cur.execute(
-                    """INSERT INTO account (email, password_hash, role, guest_id)
-                       VALUES (%s, %s, 'guest', %s) RETURNING account_id""",
-                    (body.email, password_hash, guest_id),
-                )
-                account_id = cur.fetchone()[0]
-            except psycopg.errors.UniqueViolation:
-                raise HTTPException(status_code=409, detail="This email is already registered.")
-
-            conn.commit()
+            cur.execute(
+                "INSERT INTO guest (name, email, phone) VALUES (%s, %s, %s) RETURNING guest_id",
+                (body.full_name, str(body.email), phone),
+            )
+            guest_id = cur.fetchone()[0]
+            cur.execute(
+                """INSERT INTO account (email, password_hash, role, guest_id)
+                   VALUES (%s, %s, 'guest', %s) RETURNING account_id""",
+                (str(body.email), password_hash, guest_id),
+            )
+            account_id = cur.fetchone()[0]
+        conn.commit()
+    except psycopg.errors.UniqueViolation:
+        if conn:
+            conn.rollback()
+        raise HTTPException(status_code=409, detail="This email is already registered.")
+    except psycopg.errors.UndefinedTable:
+        if conn:
+            conn.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Database schema is missing. Restart the backend so tables can be created.",
+        )
+    except psycopg.OperationalError:
+        if conn:
+            conn.rollback()
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable.")
+    except psycopg.Error as exc:
+        if conn:
+            conn.rollback()
+        raise HTTPException(status_code=400, detail=str(exc).split("\n")[0])
+    finally:
+        if conn:
+            conn.close()
 
     return Me(id=account_id, email=body.email, full_name=body.full_name, role="guest")
 
@@ -77,8 +91,10 @@ def register(body: RegisterRequest):
 def login(body: LoginRequest, request: Request):
     """Exchange credentials for a JWT pair. Rate-limited."""
     _check_rate_limit(request)
-
-    with _db() as conn:
+    conn = None
+    row = None
+    try:
+        conn = _db()
         with conn.cursor() as cur:
             cur.execute(
                 """SELECT a.account_id, a.email, a.password_hash, a.role, a.property_id, a.guest_id,
@@ -86,18 +102,31 @@ def login(body: LoginRequest, request: Request):
                    FROM account a
                    LEFT JOIN guest g ON g.guest_id = a.guest_id
                    WHERE LOWER(a.email) = LOWER(%s)""",
-                (body.email,),
+                (str(body.email),),
             )
             row = cur.fetchone()
+    except psycopg.errors.UndefinedTable:
+        raise HTTPException(
+            status_code=503,
+            detail="Database schema is missing. Restart the backend so tables can be created.",
+        )
+    except psycopg.OperationalError:
+        raise HTTPException(status_code=503, detail="Database is temporarily unavailable.")
+    finally:
+        if conn:
+            conn.close()
 
-    # Attack 8.14: identical response for unknown email and wrong password
     INVALID_MSG = "Invalid credentials."
     if row is None:
         raise HTTPException(status_code=401, detail=INVALID_MSG)
 
     account_id, email, password_hash, role, property_id, guest_id, full_name = row
 
-    if not bcrypt.checkpw(body.password.encode(), password_hash.encode()):
+    try:
+        ok = bcrypt.checkpw(body.password.encode(), (password_hash or "").encode())
+    except ValueError:
+        ok = False
+    if not ok:
         raise HTTPException(status_code=401, detail=INVALID_MSG)
 
     account = {
@@ -106,7 +135,7 @@ def login(body: LoginRequest, request: Request):
         "role": role,
         "property_id": property_id,
     }
-    access_token  = create_access_token(account)
+    access_token = create_access_token(account)
     refresh_token = create_refresh_token(account_id)
 
     return TokenPair(

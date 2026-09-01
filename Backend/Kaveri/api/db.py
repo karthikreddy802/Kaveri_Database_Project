@@ -1,4 +1,5 @@
 import os
+import time
 import psycopg
 
 
@@ -18,12 +19,15 @@ def get_conn():
         port=_env("DB_PORT", "5432"),
         connect_timeout=5,
     )
-    try:
-        return psycopg.connect(**params)
-    except psycopg.OperationalError:
-        # Local machine only: Docker Compose hostname will not resolve outside a container
-        in_docker = os.path.exists("/.dockerenv")
-        if not in_docker and params["host"] in {"db", "postgres", "database"}:
-            params["host"] = "localhost"
+    last_err = None
+    in_docker = os.path.exists("/.dockerenv")
+    for attempt in range(8):
+        try:
             return psycopg.connect(**params)
-        raise
+        except psycopg.OperationalError as exc:
+            last_err = exc
+            if not in_docker and params["host"] in {"db", "postgres", "database"}:
+                params["host"] = "localhost"
+                continue
+            time.sleep(1)
+    raise last_err
