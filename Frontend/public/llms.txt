@@ -1,0 +1,22 @@
+# Kaveri Stays
+
+> Kaveri Stays is a luxury boutique hospitality network and management platform providing premium hotel bookings, room management, and guest services across India.
+
+## Main Pages & Navigation
+
+- [Home / Portfolio](https://kaveristays.in/): Discover handpicked luxury properties, world-class amenities, and guest reviews.
+- [Properties List](https://kaveristays.in/properties): Explore luxury suites, city hotels, and heritage resorts with real-time pricing.
+- [Bookings Management](https://kaveristays.in/bookings): Manage active, confirmed, and past guest room reservations.
+- [Verified Guest Reviews](https://kaveristays.in/reviews): Authentic guest feedback, star ratings, and review submissions.
+- [Account Authentication](https://kaveristays.in/login): Secure login and registration portal for guests, staff, managers, and owners.
+
+## Features & Services
+
+- [World-Class Facilities](https://kaveristays.in/#facilities): Free Wi-Fi, 24/7 reception, luxury spa, fine dining, swimming pool, and conference halls.
+- [Payment Gateways](https://kaveristays.in/#payments): Credit cards, UPI, net banking, luxury gift cards, and instant refund processing.
+- [Security & Trust](https://kaveristays.in/#about): PCI-DSS compliant transactions, 256-bit SSL encryption, and 24/7 concierge support.
+
+## Developer & API Documentation
+
+- [API Documentation](https://kaveristays.in/docs): Interactive OpenAPI swagger documentation for properties, bookings, and guests APIs.
+- [OpenAPI Schema](https://kaveristays.in/openapi.json): Full REST API JSON specification for automated AI agent integration.

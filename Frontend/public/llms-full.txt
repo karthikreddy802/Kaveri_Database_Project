@@ -1,0 +1,25 @@
+# Kaveri Stays — Comprehensive Agent Specification
+
+> Kaveri Stays is an enterprise luxury boutique hospitality platform offering curated property bookings, real-time availability tracking, guest concierge, and management dashboards across India.
+
+## System Overview
+
+Kaveri Stays provides five-star hospitality experiences. The system supports multi-role access control for:
+- Guests: Room search, reservation booking, booking cancellation, and review submission.
+- Staff: Guest check-in/check-out management, room assignment, and service requests.
+- Managers: Property room inventory, rate management, and operational analytics.
+- Owners: Portfolio revenue reports, occupancy metrics, and multi-property oversight.
+
+## Core Web Pages
+
+- [Home / Landing Page](https://kaveristays.in/): Overview of portfolio properties (Kaveri Grand Palace Mysore, Kaveri City Suites Bangalore, Kaveri River Retreat Coorg), amenities, guest reviews, and booking access.
+- [Properties Directory](https://kaveristays.in/properties): Complete listing of properties with filtering by location, star rating, price, and amenities.
+- [Bookings Portal](https://kaveristays.in/bookings): Reservation tracking system for guests and staff to view, filter, update, or cancel room reservations.
+- [Reviews Center](https://kaveristays.in/reviews): Verified guest reviews, average ratings, detailed stay feedback, and submission modal for checked-out guests.
+- [Reports Dashboard](https://kaveristays.in/reports): Revenue, occupancy, and analytics reports for managers and owners.
+- [Auth Sign In / Sign Up](https://kaveristays.in/login): JWT-authenticated login, account registration, and password recovery.
+
+## WebMCP AI Agent Tools & APIs
+
+- [API Swagger Documentation](https://kaveristays.in/docs): RESTful OpenAPI interface details.
+- [OpenAPI JSON Specification](https://kaveristays.in/openapi.json): Raw OpenAPI 3.0 schema for agentic execution.

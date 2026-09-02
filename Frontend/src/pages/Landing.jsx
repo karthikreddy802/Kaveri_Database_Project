@@ -343,7 +343,7 @@ function PropertiesSection({ navigate }) {
             { id: 2, name: 'Kaveri City Suites', city: 'Bangalore', stars: 4 },
             { id: 3, name: 'Kaveri River Retreat', city: 'Coorg', stars: 5 },
           ]).map((p, idx) => (
-            <article key={p.id} className="lp-prop-card" role="listitem" aria-label={`${p.name} property`}>
+            <div key={p.id} className="lp-prop-card" role="listitem" aria-label={`${p.name} property`}>
               <div className="lp-prop-img-placeholder" aria-hidden="true">
                 {EMOJIS[idx % EMOJIS.length]}
               </div>
@@ -378,7 +378,7 @@ function PropertiesSection({ navigate }) {
                   </button>
                 </div>
               </div>
-            </article>
+            </div>
           ))}
         </div>
       </div>
@@ -560,7 +560,7 @@ function ReviewsSection() {
 
         <div className="lp-reviews-grid" role="list" aria-label="Guest reviews">
           {REVIEWS.map((r) => (
-            <article key={r.name} className="lp-review-card" role="listitem" aria-label={`Review by ${r.name}`}>
+            <div key={r.name} className="lp-review-card" role="listitem" aria-label={`Review by ${r.name}`}>
               <div className="lp-review-stars" aria-label={`${r.rating} out of 5 stars`}>
                 {STARS(r.rating)}
               </div>
@@ -572,7 +572,7 @@ function ReviewsSection() {
                   <div className="lp-review-meta">{r.location} · {r.date}</div>
                 </div>
               </div>
-            </article>
+            </div>
           ))}
         </div>
       </div>
@@ -741,7 +741,7 @@ function Footer() {
           </p>
           <div className="lp-footer-social" aria-label="Social media links">
             {['𝕏', 'in', 'f', '▶'].map((s, i) => (
-              <div key={i} className="lp-social-btn" role="button" tabIndex={0} aria-label={`Social link ${i + 1}`}>{s}</div>
+              <button key={i} type="button" className="lp-social-btn" aria-label={`Social link ${i + 1}`}>{s}</button>
             ))}
           </div>
         </div>

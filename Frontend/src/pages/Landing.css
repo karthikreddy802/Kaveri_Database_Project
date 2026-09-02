@@ -1055,6 +1055,8 @@
   align-items: center;
   justify-content: center;
   font-size: 16px;
+  color: inherit;
+  outline: none;
   cursor: pointer;
   transition: all 0.2s ease;
 }
